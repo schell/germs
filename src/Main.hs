@@ -3,8 +3,10 @@ module Main where
 
 import           Types
 import           Parser
+import           Step
 import           System.Exit
-import           Control.Applicative
+import           System.Environment
+import           Control.Monad
 import           Data.Attoparsec.ByteString.Char8 hiding (take)
 import qualified Data.ByteString.Char8 as B
 
@@ -12,46 +14,45 @@ import qualified Data.ByteString.Char8 as B
 main :: IO ()
 main = do
     putStrLn "GERMS!"
-    let eGerm = readGerm dna
-        dna   = concat [ "$^*"
-                       , "*X*"
-                       , "***"
+    (f:_) <- getArgs
+    txt <- readFile f
 
-                       , "**$"
-                       , "*X^"
-                       , "***"
-
-                       , "***"
-                       , "*X*"
-                       , "*^$"
-
-                       , "***"
-                       , "^X*"
-                       , "$**"
-                       ]
-    putStrLn $ "Parsing germ dna: " ++ dna
-    g <- case eGerm of
+    ds <- case readDefinitions txt of
              Left err -> putStrLn err >> exitFailure
-             Right g  -> do putStrLn $ unwords ["Read germ:", show g]
-                            return g
-    txt <- readFile "board.txt"
+             Right ds  -> return ds
+    putStrLn $ unwords ["Definitions:", show ds]
 
-    b <- case readBoard txt of
+    g <- case defsToGame ds of
              Left err -> putStrLn err >> exitFailure
-             Right b  -> do print b
-                            return b
-    return ()
+             Right g  -> return g
 
-readBoard :: String -> Either String Board
-readBoard b =
-    let width  = length $ head $ lines b
-    in parseOnly (board width) $ B.pack $ concat $ lines b
+    --_ <- forkIO $ do _ <- getLine
+    --                 exitSuccess
+    loop g
 
-readGerm :: String -> Either String Germ
-readGerm dna =
-    let rGerm = parse oneGerm $ B.pack dna
-        read' rg = case rg of
-                       Fail i ctxs err -> Left $ unwords ["error", err, "about (", unwords ctxs, ") at", B.unpack i]
-                       Partial p       -> read' (p "")
-                       Done _ g        -> Right g
-    in read' rGerm
+loop :: Game -> IO ()
+loop g = do
+    let g' = stepGame g
+        b  = gameBoard g
+        b' = gameBoard g'
+        s  = unlines $ zipWith (\l r -> l ++ pad l ++ " | " ++ r) (lines $ show b) (lines $ show b')
+        pad a = replicate (boardWidth b - length a) ' '
+
+    putStrLn s
+
+    ch <- getChar
+    when (ch == 'q') exitSuccess
+
+    if b == b'
+      then putStrLn $ unwords [ "Reached stasis after"
+                              , show $ gameSteps g
+                              , "steps."
+                              ]
+      else loop g'
+
+readDefinitions :: String -> Either String [Definition]
+readDefinitions = parseOnly definitions . B.pack
+
+readGame :: String -> Either String Game
+readGame = parseOnly game . B.pack
+
